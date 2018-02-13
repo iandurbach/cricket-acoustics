@@ -2,7 +2,15 @@ require(tuneR)
 require(seewave)
 require(signal)
 require(gtools)
+require(dtt)
+require(rgl)
 
+#function to compute STFT. 
+#wav == wave file
+#ovlp == amount of overlapy between consercutive frame
+#Fs == sampling frequency
+#N == number of samples in each window
+#nFFT == number of FFT coeffiencts
 shortTFT = function(wav, ovlp, Fs, N, nFFT)
 {
   stp = N - (ovlp/100)*N
@@ -32,13 +40,18 @@ shortTFT = function(wav, ovlp, Fs, N, nFFT)
   
   list(time = t, freq = freq, amp = data)
 }
+
+#traces peaks of a vector x between
+# two frequency bands low and high
 findPeak = function(x, low, high)
 {
   y = 20*log10(abs(x[low:high, ]))
   peak = apply(y, 2, max)
   return(peak)
 }
-padFrames  = function(ST, mat, preFram, postFram)
+
+#function to 'pad' frames during the segmentation process
+padFrames  = function(stft, mat, preFram, postFram)
 {
   n  = nrow(mat);matt = matrix(0, n, 2)
   matt[1,2] = mat[1,2] + postFram
@@ -58,9 +71,9 @@ padFrames  = function(ST, mat, preFram, postFram)
     matt[1,1] = mat[1,1] - preFram
   }
   
-  if(mat[n,2] > (ncol(ST$amp)-postFram) )
+  if(mat[n,2] > (ncol(stft$amp)-postFram) )
   {
-    matt[n,2] = ncol(ST$amp)
+    matt[n,2] = ncol(stft$amp)
   }else
   {
     matt[n,2] = mat[n,2] + postFram
@@ -68,7 +81,9 @@ padFrames  = function(ST, mat, preFram, postFram)
   
   return(matt)
 }
-traceFunc = function(x, thresh, trac, merg)
+
+#function used in the segmentation process. 
+traceFunc = function(x, thresh, trac, merg, minSamples)
 {
   fin = beg = c(); status = T
   while(status)
@@ -113,83 +128,78 @@ traceFunc = function(x, thresh, trac, merg)
       break}
   }
   data = cbind(beg, fin)
-  if(is.null(data))
+  sData = data[order(data[,1]),]
+  delete = track = c()
+  for(r in 1:(nrow(sData)-1))
   {
-    df = c(x[1],x[length(x)])
-  }
-  else
-  {
-    myData = data[order(data[,1]),]
-    delete = track = c()
-    for(r in 1:(nrow(myData)-1))
+    if(sData[r,2] > sData[(r+1),1] || sData[r,2]>sData[(r+1),2])
     {
-      if(myData[r,2] > myData[(r+1),1] || myData[r,2]>myData[(r+1),2])
-      {
-        delete = c(delete, r)
-      }
-    }
-    if(!is.null(delete))
-    {
-      myData = myData[-c(delete),]
-    }
-    for(ss in 1:(nrow(myData)-1) )
-    {
-      if( abs((myData[ss,2] - myData[(ss+1),1])) < merg )
-      {
-        track = rbind(track, c(ss, (ss+1)) )
-      }
-    }
-    
-    #check for consecutive rows that meet the criteria
-    grp = split(track, cumsum(c(0, diff(track[,2])!=1)))
-    df = myData
-    for(tt in  1:length(grp))
-    { 
-      vec = unique(grp[[tt]])
-      df[c(vec),1] = myData[min(vec),1]
-      df[c(vec),2] = myData[max(vec),2]
-    }
-    df = matrix(df[!duplicated(df), ], ncol=2)
-    
-    delete = c()
-    for(r in 1:(nrow(df)))
-    {
-      if(length(seq(df[r,1]:df[r,2])) < 13 )
-      {
-        delete = c(delete, r)
-      }
-    }
-    if(!is.null(delete))
-    {
-      df = df[-c(delete),]
+      delete = c(delete, r)
     }
   }
-  return(df)
+  if(!is.null(delete))
+  {
+    sData = sData[-c(delete),]
+  }
+  for(ss in 1:(nrow(sData)-1) )
+  {
+    if( abs((sData[ss,2] - sData[(ss+1),1])) < merg )
+    {
+      track = rbind(track, c(ss, (ss+1)) )
+    }
+  }
+  
+  #check for consecutive rows that meet the criteria
+  grp = split(track, cumsum(c(0, diff(track[,2])!=1)))
+  ssData = sData
+  for(tt in  1:length(grp))
+  { 
+    vec = unique(grp[[tt]])
+    ssData[c(vec),1] = sData[min(vec),1]
+    ssData[c(vec),2] = sData[max(vec),2]
+  }
+  ssData = ssData[!duplicated(ssData), ]
+  
+  delete = c()
+  for(r in 1:(nrow(ssData)))
+  {
+    if(length(seq(ssData[r,1]:ssData[r,2])) < minSamples )
+    {
+      delete = c(delete, r)
+    }
+  }
+  if(!is.null(delete))
+  {
+    ssData = ssData[-c(delete),]
+  }
+  return(ssData)
 }
 
-clickDetect = function(x, ST, thresh, trac, merg, preFram, postFram)
+#function to segment the signals. It takes a number of parameters,
+#which are explained in the research paper
+clickDetect = function(x, stft, thresh, trac, preMerge, minSamples, merg, preFram, postFram)
 {
   ssData = traceFunc(x, thresh, trac, merg)
   if(!is.null(ssData) && nrow(ssData) >1 )
   {
-    sData = padFrames(ST, ssData, preFram, postFram)
+    sData = padFrames(stft, ssData, preFram, postFram)
     
     newDataFrame = c()
     for(r in 1:(nrow(sData)))
     {
-      if(length(seq(sData[r,1]:sData[r,2])) <= 62 )
+      if(length(seq(sData[r,1]:sData[r,2])) < preMerge )
       {
         newDataFrame = rbind(newDataFrame, sData[r,])
       }
       else
       {
         y = x[sData[r,1]:sData[r,2]]
-        newDataFrame = rbind(newDataFrame, (traceFunc(y, 18, 2, 0.1)+sData[r,1])) 
+        newDataFrame = rbind(newDataFrame, (traceFunc(y, thresh, trac, merg)+sData[r,1])) 
       }
     }
     
-    newDataFrame = padFrames(ST, newDataFrame, preFram, postFram)
-    Time = ST$time 
+    newDataFrame = padFrames(stft, newDataFrame, preFram, postFram)
+    Time = stft$time 
     times = matrix(0, nrow(newDataFrame), 2)
     for(jj in 1:nrow(newDataFrame))
     {
@@ -204,21 +214,82 @@ clickDetect = function(x, ST, thresh, trac, merg, preFram, postFram)
   
 }
 
+#function to calculate the MFCC
+#frames == STFT
+#lowerfreq and upperfreq == the minimum and maximum frequencies to consider
+#in Herts
+#nfilterbank == the number of filterbanks that are required
+#Fs == sampling frequency
+#nMFCC == number of MFCC feature coefficients to retain
+#n window width for the computation of the MFCC derivatives. Ended up not
+#using these in the research
+calcMFCC = function(frames, lowerfreq, upperfreq, nfilterbank, Fs, nMFCC, n)
+{
+  nFFT = 2*nrow(frames)
+  #convert to mel scale
+  C = 1000/log(1+1000/700)
+  lowermel = C*log(1+lowerfreq/700)
+  uppermel = C*log(1+upperfreq/700)  
+  
+  cols = abs(frames) #magnitude spectrum
+  
+  #calculate mel energies 
+  filbank = (melfilterbank(f=Fs, wl=nFFT, m=26))$amp
+  energ  = log(t(cols)%*%filbank)
+  
+  #take discrete cosine tranform of the log filterbank energies to get
+  mfcc = (dct(energ)[,1:13])*sqrt(26/2)
+  
+  delt = deltas(t(mfcc), w=n)
+  deltdelt = deltas(delt, w=n)
+  return(cbind(mfcc, t(delt), t(deltdelt)))
+}
+#function to extract samples from wave wave after segmentation.
+#time is a dataframe of endpoints obtained from segmentation
+getclickSamples = function(samples, times, cc)
+{
+  t = (time(samples)-1)
+  st = which.min(abs(t - times[cc,1])) 
+  en = which.min(abs(t - times[cc,2]))
+  s = samples[st:en]
+  return(s)
+}
+
+
 
 #extract path of sound files
 sound_files_paths 
 
+#looping over all sound files to do the following
+#1. Segment cricket calls into syllables
+#2. Segment criket calls into chirps
+#2.1 Store segmented chirp seuquences
+#2.2 Compute MFCC from segmented chirps
 
 for(iter in 1:length(sound_files_path))
 {
+  #read in sound waves
   sound = readWave(paste(nam[iter], sep=""))
   
+  #extract vector of time series values
   file = ts(sound@left, frequency = 44100)
+  
+  #normalise the amplitude
   file = file/max(abs(file))
+  
+  #compute the short time Fourier transform
   ST = shortTFT(wav=file, ovlp=95, Fs=44100, N=512, nFFT=512)
+  
+  #get the magnitude spectrum
   ampl = abs(ST$amp)
+  
+  #find peaks of spectrum in readiness for segmentation algorithm
   peaks = findPeak(ampl, 47, 94)
-  out = clickDetect(peaks, ST, 8, 2, 0.1, 0, 0)
+  
+  
+  #A. Syllable segmentation
+  #thresholds for syllable segmentation
+  out = clickDetect(peaks, ST, 18, 2, 62, 13, 0.1, 0, 0)
   
   times = out$times
   times_vec = c(t(times))
@@ -226,10 +297,7 @@ for(iter in 1:length(sound_files_path))
   windowss = out$windows
   windowss_vec = c(t(windowss))
   
-  #check = diff(windowss_vec)
-  #cals = split(windowss_vec, cumsum(c(0, diff(windowss_vec) > 100) ) )
   tims = split(times_vec, cumsum(c(0, diff(windowss_vec) > 65) ) )
-  
   #reassemble into matrices. last two rows will give features.
   Feat = c()
   for(i in 1:length(tims))
@@ -268,8 +336,29 @@ for(iter in 1:length(sound_files_path))
   
   if(out$detect == "true")
   {
-    write.table(Feat, file = paste("TempFeat", iter, ".txt", sep=""), col.names = F, row.names = F )
+    #write temporal features to file
   }
-  print(iter)
+  
+  
+  #A. Chirp segmentation
+  #thresholds for chirp segmentation
+  out = clickDetect(peaks, stf, 8, 8, 380, 70, 35, 4, 12)
+  
+  if(out$detect == "true")
+  {
+    w = out$windows
+    
+    for(cc in 1:nrow(w))
+    {
+      frames = ampl[,seq(w[cc,1], w[cc,2])]
+      fundfreq = ff[seq(w[cc,1], w[cc,2]),2]
+      mfcc = calcMFCC(frames = frames, magspec=T, lowerfreq = 0, 
+                      upperfreq = 22050, nfilterbank = 26, Fs=44100, nMFCC=13, n=2)
+      clicks = getclickSamples(samples = file, times = out$times, cc)
+      
+      #write MFCC and samples data to file
+    }
+  }
+  
 }
 
