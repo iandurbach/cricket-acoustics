@@ -1,5 +1,5 @@
 # research-code
-All the files contained in this repo were used for my research.
+All the files contained in this repo were used for my research: Individual recognition of field crickets using acoustics.
 
 The only .R file contains functions that were used to segment the acoustic recordings and also to extract the MFCC features.
 There are multiple .py files in this repo.
