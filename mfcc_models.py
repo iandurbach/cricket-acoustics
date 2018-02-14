@@ -273,7 +273,7 @@ X_test_frame = X_test_frame.iloc[:,0:13]
  
 
 max_features = ['sqrt', 0.8, None]
-max_depth = [10, 15, 20, None]
+max_depth = [10, 20, None]
 min_samples_leaf = [1, 10, 20]  
 
 hyparams_rf =  f.expandgrid(max_features, max_depth, min_samples_leaf)
