@@ -61,13 +61,12 @@ Y_validate = numpy.array(Y_validate_call)
     
 
 min_samples_leaf = [1,5]
-max_depth = [None, 15, 20, 50, 100]
-min_samples_split = [2,5,10]
+max_depth = [None, 10, 20]
 
-hyparams =  f.expandgrid(min_samples_leaf,max_depth,min_samples_split)
+hyparams =  f.expandgrid(min_samples_leaf,max_depth)
 
 for hp in hyparams:
-    rf_classifier = RandomForestClassifier(n_estimators=100, max_depth=hp[1],min_samples_leaf=hp[0], min_samples_split = hp[2], criterion="entropy", max_features=None, oob_score=True, n_jobs=-1)
+    rf_classifier = RandomForestClassifier(n_estimators=100, max_depth=hp[1],min_samples_leaf=hp[0], criterion="entropy", max_features=None, oob_score=True, n_jobs=-1)
     
 	
     #-------------------------training results---------------------------------------
